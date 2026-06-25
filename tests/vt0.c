@@ -77,6 +77,7 @@ static int _get_color_idx( const int ival)
 }
 
 static int verbose = 0;
+static bool in_alt_screen = FALSE;  /* An exit from none is ignored */
 
 int create_term( const char* szCommand, const char **args,
                  const char **environ)
@@ -224,8 +225,10 @@ int create_term( const char* szCommand, const char **args,
                                        case 25:   /* show cursor */
                                            break;
                                        case 47:   /* use alt screen buff */
+                                       case 1049: /* also saving the cursor */
                                              /* should actually save current screen... */
                                            scrollok( stdscr, FALSE);
+                                           in_alt_screen = TRUE;
                                            break;
                                        }
                                  break;
@@ -240,9 +243,14 @@ int create_term( const char* szCommand, const char **args,
                                        case 25:   /* hide cursor */
                                            break;
                                        case 47:   /* use normal screen buff */
-                                           clear( );
-                                           move( 0, 0);
-                                           scrollok( stdscr, TRUE);
+                                       case 1049: /* also restoring the cursor */
+                                           if( in_alt_screen)
+                                           {
+                                              clear( );
+                                              move( 0, 0);
+                                              scrollok( stdscr, TRUE);
+                                              in_alt_screen = FALSE;
+                                           }
                                            break;
                                        }
                                  break;
