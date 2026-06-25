@@ -59,7 +59,9 @@ elseif(CMAKE_SYSTEM_NAME MATCHES "^Retro")
 
 else()
 
-    add_subdirectory(ncurses)
+    if(PDC_NCURSES_BUILD)
+        add_subdirectory(ncurses)
+    endif()
 
     if(PDC_SDL2_BUILD)
         add_subdirectory(sdl2)
@@ -69,18 +71,28 @@ else()
         add_subdirectory(gl)
     endif()
 
-    if(UNIX)
+    if(UNIX AND PDC_VT_BUILD)
         add_subdirectory(vt)
     endif()
 
     if(WIN32)
-        add_subdirectory(wincon)
-        add_subdirectory(wingui)
-        add_subdirectory(vt)
+        if(PDC_WINCON_BUILD)
+            add_subdirectory(wincon)
+        endif()
+
+        if(PDC_WINGUI_BUILD)
+            add_subdirectory(wingui)
+        endif()
+
+        if(PDC_VT_BUILD)
+            add_subdirectory(vt)
+        endif()
     endif()
 
 endif()
 
-add_custom_target(uninstall "${CMAKE_COMMAND}" -P "${CMAKE_SOURCE_DIR}/cmake/make_uninstall.cmake")
+if(NOT TARGET uninstall)
+    add_custom_target(uninstall "${CMAKE_COMMAND}" -P "${CMAKE_SOURCE_DIR}/cmake/make_uninstall.cmake")
+endif()
 
 set(CPACK_COMPONENTS_ALL applications)

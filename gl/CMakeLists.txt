@@ -30,11 +30,7 @@ macro (gl_app dir targ)
         set(src_files ${CMAKE_CURRENT_SOURCE_DIR}/${dir}/${targ}.c)
     endif()
 
-    if(${ARGV2})
-        add_executable(${bin_name} WIN32 ${src_files})
-    else()
-        add_executable(${bin_name} ${src_files})
-    endif()
+    add_executable(${bin_name} ${ARGN} ${src_files})
 
     target_link_libraries(${bin_name} PUBLIC ${PDCURSE_PROJ} ${EXTRA_LIBS}
         "${SDL2_LIBRARIES};${SDL2_TTF_LIBRARY};${FT2_LIBRARY};${ZLIB_LIBRARY};${SDL2_DEP_LIBRARIES}")
