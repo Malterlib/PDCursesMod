@@ -1,6 +1,9 @@
 /* PDCursesMod */
 
 #include <curspriv.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 /*man-start**************************************************************
 
@@ -35,9 +38,8 @@ terminfo
 
 ### Description
 
-   These functions are currently implemented as stubs,
-   returning the appropriate errors and doing nothing else.
-   They are only compiled and used for certain ncurses tests.
+   These functions provide a small built-in VT-compatible termcap surface.
+   Capabilities outside that subset return the appropriate errors.
 
 ### Portability
    Function              | X/Open | ncurses | NetBSD
@@ -49,6 +51,177 @@ terminfo
 #include <term.h>
 
 TERMINAL *cur_term = NULL;
+
+typedef struct
+{
+    const char *id;
+    const char *value;
+} PDC_TERM_STRING_CAP;
+
+typedef struct
+{
+    const char *id;
+    int value;
+} PDC_TERM_NUM_CAP;
+
+static const char * const _pdc_vt_term_names[] =
+{
+    "alacritty",
+    "ansi",
+    "foot",
+    "gnome",
+    "kitty",
+    "konsole",
+    "linux",
+    "rxvt",
+    "screen",
+    "tmux",
+    "vt100",
+    "vt220",
+    "vte",
+    "wezterm",
+    "xterm",
+    NULL
+};
+
+static const char * const _pdc_dumb_term_names[] =
+{
+    "dumb",
+    "emacs",
+    NULL
+};
+
+static const PDC_TERM_STRING_CAP _pdc_vt_term_strings[] =
+{
+    { "@7", "\033[F" },
+    { "DC", "\033[%dP" },
+    { "DO", "\033[%dB" },
+    { "IC", "\033[%d@" },
+    { "LE", "\033[%dD" },
+    { "RI", "\033[%dC" },
+    { "UP", "\033[%dA" },
+    { "al", "\033[L" },
+    { "bl", "\007" },
+    { "cd", "\033[J" },
+    { "ce", "\033[K" },
+    { "ch", "\033[%i%dG" },
+    { "cl", "\033[H\033[2J" },
+    { "dc", "\033[P" },
+    { "dl", "\033[M" },
+    { "ei", "\033[4l" },
+    { "ho", "\033[H" },
+    { "ic", "\033[@" },
+    { "im", "\033[4h" },
+    { "kD", "\033[3~" },
+    { "kd", "\033[B" },
+    { "kh", "\033[H" },
+    { "kl", "\033[D" },
+    { "kr", "\033[C" },
+    { "ku", "\033[A" },
+    { "md", "\033[1m" },
+    { "me", "\033[0m" },
+    { "nd", "\033[C" },
+    { "se", "\033[0m" },
+    { "so", "\033[7m" },
+    { "ue", "\033[0m" },
+    { "up", "\033[A" },
+    { "us", "\033[4m" },
+    { "vb", "\033[?5h\033[?5l" },
+    { NULL, NULL }
+};
+
+static const PDC_TERM_NUM_CAP _pdc_vt_term_nums[] =
+{
+    { "co", 80 },
+    { "li", 24 },
+    { NULL, 0 }
+};
+
+static int _pdc_term_is_vt = FALSE;
+static char _pdc_tgoto_buffer[64];
+
+static bool _pdc_term_name_matches(const char *name, const char *candidate)
+{
+    const size_t candidate_length = strlen(candidate);
+
+    return !strncmp(name, candidate, candidate_length) &&
+           (name[candidate_length] == '\0' ||
+            name[candidate_length] == '-' ||
+            name[candidate_length] == '.' ||
+            name[candidate_length] == '+');
+}
+
+static bool _pdc_term_name_is_in_list(const char *name, const char * const *list)
+{
+    while (*list)
+    {
+        if (_pdc_term_name_matches(name, *list))
+            return true;
+
+        list++;
+    }
+
+    return false;
+}
+
+static const char *_pdc_find_term_string(const char *id)
+{
+    const PDC_TERM_STRING_CAP *cap = _pdc_vt_term_strings;
+
+    if (!_pdc_term_is_vt || !id)
+        return NULL;
+
+    while (cap->id)
+    {
+        if (!strcmp(cap->id, id))
+            return cap->value;
+
+        cap++;
+    }
+
+    return NULL;
+}
+
+static int _pdc_find_term_num(const char *id)
+{
+    const PDC_TERM_NUM_CAP *cap = _pdc_vt_term_nums;
+
+    if (!_pdc_term_is_vt || !id)
+        return ERR;
+
+    while (cap->id)
+    {
+        if (!strcmp(cap->id, id))
+            return cap->value;
+
+        cap++;
+    }
+
+    return ERR;
+}
+
+static int _pdc_find_term_flag(const char *id)
+{
+    if (!_pdc_term_is_vt || !id)
+        return FALSE;
+
+    return !strcmp(id, "am") ||
+           !strcmp(id, "km") ||
+           !strcmp(id, "pt") ||
+           !strcmp(id, "xn");
+}
+
+static void _pdc_add_tgoto_number(char **output, char *end, int value)
+{
+    const int written = snprintf(*output, (size_t)(end - *output), "%d", value);
+
+    if (written > 0)
+    {
+        *output += written;
+        if (*output > end)
+            *output = end;
+    }
+}
 
 int vidattr(chtype attr)
 {
@@ -100,8 +273,7 @@ int putp(const char *str)
 {
     PDC_LOG(("putp() - called: str %s\n", str));
 
-    INTENTIONALLY_UNUSED_PARAMETER( str);
-    return ERR;
+    return tputs(str, 1, putchar);
 }
 
 int restartterm(const char *term, int filedes, int *errret)
@@ -128,20 +300,25 @@ int setterm(const char *term)
 {
     PDC_LOG(("setterm() - called\n"));
 
-    INTENTIONALLY_UNUSED_PARAMETER( term);
-    return ERR;
+    return tgetent(NULL, term) == 1 ? OK : ERR;
 }
 
 int setupterm(const char *term, int filedes, int *errret)
 {
     PDC_LOG(("setupterm() - called\n"));
 
-    if (errret)
-        *errret = -1;
-    else
-        fprintf(stderr, "There is no terminfo database\n");
+    if (tgetent(NULL, term) == 1)
+    {
+        if (errret)
+            *errret = 1;
 
-    INTENTIONALLY_UNUSED_PARAMETER( term);
+        INTENTIONALLY_UNUSED_PARAMETER( filedes);
+        return OK;
+    }
+
+    if (errret)
+        *errret = 0;
+
     INTENTIONALLY_UNUSED_PARAMETER( filedes);
     return ERR;
 }
@@ -150,68 +327,159 @@ int tgetent(char *bp, const char *name)
 {
     PDC_LOG(("tgetent() - called: name %s\n", name));
 
-    INTENTIONALLY_UNUSED_PARAMETER( bp);
-    INTENTIONALLY_UNUSED_PARAMETER( name);
-    return ERR;
+    if (bp)
+        *bp = '\0';
+
+    _pdc_term_is_vt = FALSE;
+
+    if (!name || !*name)
+        name = getenv("TERM");
+
+    if (!name || !*name || _pdc_term_name_is_in_list(name, _pdc_dumb_term_names))
+        return 0;
+
+    if (_pdc_term_name_is_in_list(name, _pdc_vt_term_names))
+    {
+        _pdc_term_is_vt = TRUE;
+        return 1;
+    }
+
+    return 0;
 }
 
 int tgetflag(const char *id)
 {
     PDC_LOG(("tgetflag() - called: id %s\n", id));
 
-    INTENTIONALLY_UNUSED_PARAMETER( id);
-    return ERR;
+    return _pdc_find_term_flag(id);
 }
 
 int tgetnum(const char *id)
 {
     PDC_LOG(("tgetnum() - called: id %s\n", id));
 
-    INTENTIONALLY_UNUSED_PARAMETER( id);
-    return ERR;
+    return _pdc_find_term_num(id);
 }
 
 char *tgetstr(const char *id, char **area)
 {
+    const char *cap;
+
     PDC_LOG(("tgetstr() - called: id %s\n", id));
 
-    INTENTIONALLY_UNUSED_PARAMETER( id);
-    INTENTIONALLY_UNUSED_PARAMETER( area);
-    return (char *)NULL;
+    cap = _pdc_find_term_string(id);
+
+    if (!cap)
+        return (char *)NULL;
+
+    if (area && *area)
+    {
+        char *result = *area;
+
+        strcpy(*area, cap);
+        *area += strlen(cap) + 1;
+        return result;
+    }
+
+    return (char *)cap;
 }
 
 char *tgoto(const char *cap, int col, int row)
 {
+    const char *input;
+    char *output;
+    char *end;
+    int values[2];
+    int current_value;
+
     PDC_LOG(("tgoto() - called\n"));
 
-    INTENTIONALLY_UNUSED_PARAMETER( cap);
-    INTENTIONALLY_UNUSED_PARAMETER( col);
-    INTENTIONALLY_UNUSED_PARAMETER( row);
-    return (char *)NULL;
+    if (!cap)
+        return (char *)NULL;
+
+    input = cap;
+    output = _pdc_tgoto_buffer;
+    end = _pdc_tgoto_buffer + sizeof(_pdc_tgoto_buffer) - 1;
+    values[0] = row;
+    values[1] = col;
+    current_value = 0;
+
+    while (*input && output < end)
+    {
+        if (*input != '%')
+        {
+            *output++ = *input++;
+            continue;
+        }
+
+        input++;
+
+        switch (*input)
+        {
+        case '\0':
+            input--;
+            break;
+
+        case '%':
+            *output++ = '%';
+            break;
+
+        case 'i':
+            values[0]++;
+            values[1]++;
+            break;
+
+        case 'r':
+        {
+            const int temp = values[0];
+
+            values[0] = values[1];
+            values[1] = temp;
+            break;
+        }
+
+        case 'd':
+            _pdc_add_tgoto_number(&output, end, values[current_value]);
+            if (current_value < 1)
+                current_value++;
+            break;
+
+        default:
+            if (output + 1 < end)
+            {
+                *output++ = '%';
+                *output++ = *input;
+            }
+            break;
+        }
+
+        if (*input)
+            input++;
+    }
+
+    *output = '\0';
+    return _pdc_tgoto_buffer;
 }
 
 int tigetflag(const char *capname)
 {
     PDC_LOG(("tigetflag() - called: capname %s\n", capname));
 
-    INTENTIONALLY_UNUSED_PARAMETER( capname);
-    return -1;
+    return _pdc_find_term_flag(capname);
 }
 
 int tigetnum(const char *capname)
 {
     PDC_LOG(("tigetnum() - called: capname %s\n", capname));
 
-    INTENTIONALLY_UNUSED_PARAMETER( capname);
-    return -2;
+    return _pdc_find_term_num(capname);
 }
 
 char *tigetstr(const char *capname)
 {
     PDC_LOG(("tigetstr() - called: capname %s\n", capname));
 
-    INTENTIONALLY_UNUSED_PARAMETER( capname);
-    return (char *)(-1);
+    return tgetstr(capname, NULL);
 }
 
 char *tparm(const char *cap, long p1, long p2, long p3, long p4,
@@ -236,8 +504,13 @@ int tputs(const char *str, int affcnt, int (*putfunc)(int))
 {
     PDC_LOG(("tputs() - called\n"));
 
-    INTENTIONALLY_UNUSED_PARAMETER( str);
     INTENTIONALLY_UNUSED_PARAMETER( affcnt);
-    INTENTIONALLY_UNUSED_PARAMETER( putfunc);
-    return ERR;
+
+    if (!str || !putfunc)
+        return ERR;
+
+    while (*str)
+        putfunc((unsigned char)*str++);
+
+    return OK;
 }
