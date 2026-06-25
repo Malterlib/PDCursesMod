@@ -265,6 +265,7 @@ SCREEN *newterm(const char *type, FILE *outfd, FILE *infd)
        of stdscr by the number of lines ripped off */
 
     ripoffline( 0, NULL);   /* copy stored ripped-line data into SP */
+    PDC_reset_panel_stack();
     lines_ripped_off_on_top = _update_ripped_off_lines( SP);
 
     stdscr = newwin(LINES, COLS, lines_ripped_off_on_top, 0);
@@ -312,6 +313,8 @@ SCREEN *newterm(const char *type, FILE *outfd, FILE *infd)
         return NULL;
     SP->c_ungind = 0;
     SP->c_ungmax = NUNGETCH;
+
+    PDC_set_panel_stdscr();
 
     return SP;
 }
@@ -398,6 +401,7 @@ void delscreen(SCREEN *sp)
     stdscr = (WINDOW *)NULL;
     curscr = (WINDOW *)NULL;
     SP->lastscr = (WINDOW *)NULL;
+    PDC_reset_panel_stack();
 
     SP->alive = FALSE;
 
