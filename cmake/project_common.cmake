@@ -105,9 +105,18 @@ else()
     add_library (${PDCURSE_PROJ} STATIC ${pdc_src_files} ${pdcurses_src_files})
     install (TARGETS ${PDCURSE_PROJ} ARCHIVE DESTINATION ${PDCURSES_DIST}/lib/${PROJECT_NAME} COMPONENT applications)
     set_target_properties(${PDCURSE_PROJ} PROPERTIES OUTPUT_NAME "pdcursesstatic")
+
+    if((${PROJECT_NAME} STREQUAL "wincon") OR (${PROJECT_NAME} STREQUAL "wingui") OR (${PROJECT_NAME} STREQUAL "vt"))
+        target_link_libraries(${PDCURSE_PROJ} PUBLIC ${WINCON_WINGUI_DEP_LIBS})
+    endif()
 endif()
 
 target_link_libraries(${PDCURSE_PROJ} PUBLIC pdcurses_include_dirs)
+target_compile_definitions(${PDCURSE_PROJ} PUBLIC
+    $<$<BOOL:${PDC_WIDE}>:PDC_WIDE>
+    $<$<BOOL:${PDC_UTF8}>:PDC_FORCE_UTF8>
+    $<$<BOOL:${PDC_CHTYPE_32}>:CHTYPE_32>
+)
 
 macro (demo_app dir targ)
     set(bin_name "${PROJECT_NAME}_${targ}")
@@ -117,7 +126,7 @@ macro (demo_app dir targ)
         set(src_files ${CMAKE_CURRENT_SOURCE_DIR}/${dir}/${targ}.c)
     endif()
 
-    add_executable(${bin_name} ${ARGV2} ${src_files})
+    add_executable(${bin_name} ${ARGN} ${src_files})
 
     target_link_libraries(${bin_name} PRIVATE ${PDCURSE_PROJ} ${EXTRA_LIBS})
     if((${PROJECT_NAME} STREQUAL "wincon") OR (${PROJECT_NAME} STREQUAL "wingui") OR (${PROJECT_NAME} STREQUAL "vt"))
