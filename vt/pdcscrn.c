@@ -189,6 +189,30 @@ void PDC_check_for_resize( void)
 
 static mmask_t _stored_trap_mbe;
 
+#if !defined( DOS)
+/* Only an alternate screen that PDCurses entered is left, as a caller's own
+   alternate screen ends with the exit sequence of mode 1049 */
+static bool _alternate_screen_entered = FALSE;
+
+static void _enter_alternate_screen( void)
+{
+    if( !SP->_preserve && !_alternate_screen_entered)
+    {
+        PDC_puts_to_stdout( PDC_is_ansi ? CSI "?47h" : CSI "?1049h");
+        _alternate_screen_entered = TRUE;
+    }
+}
+
+static void _leave_alternate_screen( void)
+{
+    if( _alternate_screen_entered)
+    {
+        PDC_puts_to_stdout( PDC_is_ansi ? CSI "?47l" : CSI "?1049l");
+        _alternate_screen_entered = FALSE;
+    }
+}
+#endif
+
 /* COLOR_PAIR to attribute encoding table. */
 
 void PDC_reset_prog_mode( void)
@@ -208,8 +232,7 @@ void PDC_reset_prog_mode( void)
 #if !defined( DOS)
     if( !PDC_is_ansi)
         PDC_puts_to_stdout( CSI "?1006h");    /* Set SGR mouse tracking,  if available */
-    if( !SP->_preserve)
-       PDC_puts_to_stdout( CSI "?47h");      /* Save screen */
+    _enter_alternate_screen( );
 #endif
     PDC_puts_to_stdout( "\033" "7");         /* save cursor & attribs (VT100) */
 
@@ -266,7 +289,7 @@ void PDC_scr_close( void)
    PDC_puts_to_stdout( "\033" "8");         /* restore cursor & attribs (VT100) */
    PDC_puts_to_stdout( CSI "m");         /* set default screen attributes */
 #if !defined( DOS)
-   PDC_puts_to_stdout( CSI "?47l");      /* restore screen */
+   _leave_alternate_screen( );
    PDC_curs_set( 2);          /* blinking block cursor */
 #endif
    PDC_gotoyx( PDC_cols - 1, 0);
@@ -291,6 +314,11 @@ void PDC_scr_free( void)
     PDC_free_palette( );
 #ifdef USING_COMBINING_CHARACTER_SCHEME
     PDC_expand_combined_characters( 0, NULL);
+#endif
+#if !defined( DOS)
+    /* A screen that is freed without endwin(), as one whose terminal is
+       gone, leaves the next screen to enter the alternate screen */
+    _alternate_screen_entered = FALSE;
 #endif
 }
 
