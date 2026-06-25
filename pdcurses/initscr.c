@@ -313,6 +313,8 @@ SCREEN *newterm(const char *type, FILE *outfd, FILE *infd)
     SP->c_ungind = 0;
     SP->c_ungmax = NUNGETCH;
 
+    PDC_reset_panel_stack();
+
     return SP;
 }
 
@@ -398,6 +400,7 @@ void delscreen(SCREEN *sp)
     stdscr = (WINDOW *)NULL;
     curscr = (WINDOW *)NULL;
     SP->lastscr = (WINDOW *)NULL;
+    PDC_reset_panel_stack();
 
     SP->alive = FALSE;
 

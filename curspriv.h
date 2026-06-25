@@ -114,6 +114,7 @@ void    PDC_mark_cells_as_changed( WINDOW *, const int y, const int start, const
 void    PDC_mark_cell_as_changed( WINDOW *, const int y, const int x);
 bool    PDC_touched_range( const WINDOW *win, const int y, int *firstch, int *lastch);
 int     PDC_wscrl(WINDOW *win, const int top, const int bottom, int n);
+void    PDC_reset_panel_stack(void);
 
 #ifdef PDC_WIDE
    #define PDC_IS_LOW_SURROGATE( c) ((c) >= 0xdc00 && (c) < 0xe000)

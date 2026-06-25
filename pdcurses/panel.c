@@ -159,6 +159,24 @@ though. */
 #define _bottom_panel  _stdscr_pseudo_panel.above
 #define _top_panel     _stdscr_pseudo_panel.below
 
+static void _reset_stdscr_pseudo_panel(void)
+{
+    _stdscr_pseudo_panel.win = stdscr;
+    _stdscr_pseudo_panel.user = "stdscr";
+    _top_panel = _bottom_panel = &_stdscr_pseudo_panel;
+}
+
+void PDC_reset_panel_stack(void)
+{
+    _reset_stdscr_pseudo_panel();
+}
+
+static void _ensure_stdscr_pseudo_panel(void)
+{
+    if( _stdscr_pseudo_panel.win != stdscr)
+        _reset_stdscr_pseudo_panel();
+}
+
 static bool _windows_overlapped( const WINDOW *win1, const WINDOW *win2)
 {
     assert( win1);
@@ -386,12 +404,7 @@ PANEL *new_panel(WINDOW *win)
 
     pan  = malloc(sizeof(PANEL));
 
-    if (!_stdscr_pseudo_panel.win)
-    {
-        _stdscr_pseudo_panel.win = stdscr;
-        _stdscr_pseudo_panel.user = "stdscr";
-        _top_panel = _bottom_panel = &_stdscr_pseudo_panel;
-    }
+    _ensure_stdscr_pseudo_panel();
 
     if (pan)
     {
@@ -407,7 +420,10 @@ PANEL *new_panel(WINDOW *win)
 
 PANEL *panel_above(const PANEL *pan)
 {
-    PANEL *rval = (pan ? pan->above : _bottom_panel);
+    PANEL *rval;
+
+    _ensure_stdscr_pseudo_panel();
+    rval = (pan ? pan->above : _bottom_panel);
 
     if( rval == &_stdscr_pseudo_panel)
         rval = NULL;
@@ -416,7 +432,10 @@ PANEL *panel_above(const PANEL *pan)
 
 PANEL *panel_below(const PANEL *pan)
 {
-    PANEL *rval = (pan ? pan->below : _top_panel);
+    PANEL *rval;
+
+    _ensure_stdscr_pseudo_panel();
+    rval = (pan ? pan->below : _top_panel);
 
     if( rval == &_stdscr_pseudo_panel)
         rval = NULL;
@@ -524,9 +543,12 @@ panels and calling _override( PANELS_ABOVE) for each one.  */
 
 void update_panels(void)
 {
-    PANEL *pan = _bottom_panel;
+    PANEL *pan;
 
     PDC_LOG(("update_panels() - called\n"));
+
+    _ensure_stdscr_pseudo_panel();
+    pan = _bottom_panel;
 
     assert( pan);
     while( pan != &_stdscr_pseudo_panel)     /* look at each panel;  update */
