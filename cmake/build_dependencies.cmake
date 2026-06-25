@@ -1,5 +1,7 @@
 
-IF (PDC_SDL2_DEPS_BUILD)
+# Only the SDL2 and OpenGL ports use these, which CMakeLists.txt doesn't build with the DOS, OS/2, X11 and Retro ports
+IF (PDC_SDL2_DEPS_BUILD AND (PDC_SDL2_BUILD OR PDC_GL_BUILD) AND NOT (PDC_DOS_BUILD OR PDC_DOSVGA_BUILD OR PDC_DOSVT_BUILD
+        OR PDC_OS2_BUILD OR PDC_X11_BUILD OR CMAKE_SYSTEM_NAME MATCHES "^Retro"))
 
     INCLUDE(ExternalProject)
 
