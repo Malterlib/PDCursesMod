@@ -189,6 +189,21 @@ void PDC_check_for_resize( void)
 
 static mmask_t _stored_trap_mbe;
 
+static void _enter_alternate_screen( void)
+{
+#if !defined( DOS)
+    if( !SP->_preserve)
+        PDC_puts_to_stdout( PDC_is_ansi ? CSI "?47h" : CSI "?1049h");
+#endif
+}
+
+static void _leave_alternate_screen( void)
+{
+#if !defined( DOS)
+    PDC_puts_to_stdout( PDC_is_ansi ? CSI "?47l" : CSI "?1049l");
+#endif
+}
+
 /* COLOR_PAIR to attribute encoding table. */
 
 void PDC_reset_prog_mode( void)
@@ -208,8 +223,7 @@ void PDC_reset_prog_mode( void)
 #if !defined( DOS)
     if( !PDC_is_ansi)
         PDC_puts_to_stdout( CSI "?1006h");    /* Set SGR mouse tracking,  if available */
-    if( !SP->_preserve)
-       PDC_puts_to_stdout( CSI "?47h");      /* Save screen */
+    _enter_alternate_screen( );
 #endif
     PDC_puts_to_stdout( "\033" "7");         /* save cursor & attribs (VT100) */
 
@@ -266,7 +280,7 @@ void PDC_scr_close( void)
    PDC_puts_to_stdout( "\033" "8");         /* restore cursor & attribs (VT100) */
    PDC_puts_to_stdout( CSI "m");         /* set default screen attributes */
 #if !defined( DOS)
-   PDC_puts_to_stdout( CSI "?47l");      /* restore screen */
+   _leave_alternate_screen( );
    PDC_curs_set( 2);          /* blinking block cursor */
 #endif
    PDC_gotoyx( PDC_cols - 1, 0);
