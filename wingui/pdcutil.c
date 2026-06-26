@@ -36,6 +36,15 @@ void PDC_napms(int ms)     /* 'ms' = milli,  _not_ microseconds! */
     } while( !PDC_bDone && remains > 0);
 }
 
+bool PDC_wait_for_key_or_timeout(int ms)
+{
+    if( ms <= 0)
+        return FALSE;
+
+    MsgWaitForMultipleObjects( 0, NULL, FALSE, (DWORD)ms, QS_ALLINPUT);
+    return TRUE;
+}
+
 const char *PDC_sysname(void)
 {
    return "WinGUI";

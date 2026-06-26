@@ -1,6 +1,11 @@
 /* PDCurses */
 
 #include <curspriv.h>
+
+#if !defined( _WIN32) && !defined( DOS)
+# include <sys/select.h>
+# include <unistd.h>
+#endif
 #include <assert.h>
 
 /*man-start**************************************************************
@@ -521,6 +526,36 @@ static bool _fast_check_key( void)
 #endif
 }
 
+static void _wait_for_key_or_timeout( const int ms)
+{
+#if defined( _WIN32) && !defined( DOS)
+    if( PDC_wait_for_key_or_timeout( ms))
+        return;
+#elif !defined( _WIN32) && !defined( DOS)
+    extern enum PDC_port PDC_port_val;
+
+    if( ms > 0 && ( PDC_port_val == PDC_PORT_VT || PDC_port_val == PDC_PORT_LINUX_FB)
+            && SP && SP->input_fd)
+    {
+        const int fd = fileno( SP->input_fd);
+        if( fd >= 0)
+        {
+            fd_set rdset;
+            struct timeval timeout;
+
+            FD_ZERO( &rdset);
+            FD_SET( fd, &rdset);
+            timeout.tv_sec = ms / 1000;
+            timeout.tv_usec = ( ms % 1000) * 1000;
+            select( fd + 1, &rdset, NULL, NULL, &timeout);
+            return;
+        }
+    }
+#endif
+
+    napms( ms);
+}
+
 
 bool PDC_is_function_key( const int key)
 {
@@ -591,7 +626,7 @@ static int _raw_wgetch_no_surrogate_pairs( WINDOW *win)
                     nap_time = remaining_millisecs;
                 remaining_millisecs -= nap_time;
             }
-            napms( nap_time);
+            _wait_for_key_or_timeout( nap_time);
         }
 
         /* if there is, fetch it */

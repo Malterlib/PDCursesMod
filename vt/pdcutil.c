@@ -63,6 +63,25 @@ void PDC_napms(int ms)
     }
     while( remains > 0);
 }
+
+#ifdef _WIN32
+bool PDC_wait_for_key_or_timeout(int ms)
+{
+    HANDLE input_handle;
+
+    if( ms <= 0)
+        return FALSE;
+
+    PDC_check_for_resize( );
+    input_handle = GetStdHandle( STD_INPUT_HANDLE);
+    if( input_handle == INVALID_HANDLE_VALUE || !input_handle)
+        return FALSE;
+
+    WaitForSingleObject( input_handle, (DWORD)ms);
+    PDC_check_for_resize( );
+    return TRUE;
+}
+#endif
 #endif               /* non-DOS case */
 
 const char *PDC_sysname(void)

@@ -30,6 +30,15 @@ void PDC_napms(int ms)     /* 'ms' = milli,  _not_ microseconds! */
     } while( remains > 0);
 }
 
+bool PDC_wait_for_key_or_timeout(int ms)
+{
+    if( ms <= 0 || pdc_con_in == INVALID_HANDLE_VALUE)
+        return FALSE;
+
+    WaitForSingleObject( pdc_con_in, (DWORD)ms);
+    return TRUE;
+}
+
 const char *PDC_sysname(void)
 {
     return "Windows";
