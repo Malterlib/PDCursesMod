@@ -32,6 +32,13 @@ int PDC_is_ansi = FALSE;
 int PDC_rows = -1, PDC_cols = -1;
 bool PDC_resize_occurred = FALSE;
 
+#ifdef USE_TERMIOS
+static struct sigaction saved_sigint_action;
+static struct sigaction saved_sigwinch_action;
+static bool saved_sigint_action_valid = FALSE;
+static bool saved_sigwinch_action_valid = FALSE;
+#endif
+
 #ifdef _WIN32
 
 #ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
@@ -309,8 +316,32 @@ void PDC_scr_close( void)
    return;
 }
 
+#ifdef USE_TERMIOS
+static void sigwinchHandler( int sig);
+static void sigintHandler( int sig);
+#endif
+
 void PDC_scr_free( void)
 {
+#ifdef USE_TERMIOS
+    struct sigaction current;
+
+    /* A handler that the caller installed after PDCurses' own stays */
+    if( saved_sigint_action_valid)
+    {
+        if( sigaction( SIGINT, NULL, &current) == 0
+                 && current.sa_handler == sigintHandler)
+            sigaction( SIGINT, &saved_sigint_action, NULL);
+        saved_sigint_action_valid = FALSE;
+    }
+    if( saved_sigwinch_action_valid)
+    {
+        if( sigaction( SIGWINCH, NULL, &current) == 0
+                 && current.sa_handler == sigwinchHandler)
+            sigaction( SIGWINCH, &saved_sigwinch_action, NULL);
+        saved_sigwinch_action_valid = FALSE;
+    }
+#endif
     PDC_free_palette( );
 #ifdef USING_COMBINING_CHARACTER_SCHEME
     PDC_expand_combined_characters( 0, NULL);
@@ -344,17 +375,40 @@ static void sigwinchHandler( int sig)
 
 int PDC_n_ctrl_c = 0;
 
+static bool _saved_sigint_action_is_ignored( void)
+{
+    return( saved_sigint_action_valid
+            && !( saved_sigint_action.sa_flags & SA_SIGINFO)
+            && saved_sigint_action.sa_handler == SIG_IGN);
+}
+
+static bool _saved_sigint_action_is_custom( void)
+{
+    if( !saved_sigint_action_valid)
+        return( FALSE);
+    if( saved_sigint_action.sa_flags & SA_SIGINFO)
+        return( saved_sigint_action.sa_sigaction != NULL);
+
+    return( saved_sigint_action.sa_handler != SIG_DFL
+            && saved_sigint_action.sa_handler != SIG_IGN);
+}
+
 static void sigintHandler( int sig)
 {
     INTENTIONALLY_UNUSED_PARAMETER( sig);
-    if( !SP->raw_inp)
+
+    if( _saved_sigint_action_is_ignored( ))
+        return;
+
+    if( SP && ( SP->raw_inp || _saved_sigint_action_is_custom( )))
     {
-        PDC_scr_close( );
-        PDC_scr_free( );
-        exit( 0);
-    }
-    else
         PDC_n_ctrl_c++;
+        return;
+    }
+
+    PDC_scr_close( );
+    PDC_scr_free( );
+    exit( 0);
 }
 #endif
 
@@ -370,7 +424,7 @@ int PDC_scr_open(void)
     const char *colorterm = getenv( "COLORTERM");
     chtype PDC_capabilities = 0;
 #ifdef USE_TERMIOS
-    struct sigaction sa;
+    struct sigaction sa, displaced;
 #endif
 #ifdef _WIN32
     set_win10_for_vt_codes( TRUE);
@@ -408,18 +462,31 @@ int PDC_scr_open(void)
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
     sa.sa_handler = sigwinchHandler;
-    if (sigaction(SIGWINCH, &sa, NULL) == -1)
+    if (sigaction(SIGWINCH, &sa, &displaced) == -1)
     {
         fprintf( stderr, "Sigaction failed\n");
         return( -1);
     }
+    /* The action displaced is the caller's, unless it is PDCurses' own,
+       of a screen that was ended but not deleted */
+    if( !saved_sigwinch_action_valid
+            || displaced.sa_handler != sigwinchHandler)
+    {
+        saved_sigwinch_action = displaced;
+        saved_sigwinch_action_valid = TRUE;
+    }
     sigwinchHandler( 0);
 
     sa.sa_handler = sigintHandler;
-    if (sigaction(SIGINT, &sa, NULL) == -1)
+    if (sigaction(SIGINT, &sa, &displaced) == -1)
     {
         fprintf( stderr, "Sigaction (INT) failed\n");
         return( -1);
+    }
+    if( !saved_sigint_action_valid || displaced.sa_handler != sigintHandler)
+    {
+        saved_sigint_action = displaced;
+        saved_sigint_action_valid = TRUE;
     }
 #else
     {
