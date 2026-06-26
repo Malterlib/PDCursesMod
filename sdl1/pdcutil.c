@@ -26,6 +26,13 @@ void PDC_napms(int ms)
     PDC_check_for_blinking( );
 }
 
+/* Has no input handle to wait on, so wgetch() polls with napms() */
+bool PDC_wait_for_key_or_timeout(int ms)
+{
+    INTENTIONALLY_UNUSED_PARAMETER( ms);
+    return FALSE;
+}
+
 const char *PDC_sysname(void)
 {
     return "SDL";

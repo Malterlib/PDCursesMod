@@ -1,6 +1,15 @@
 /* PDCurses */
 
 #include <curspriv.h>
+
+/* Classic Mac OS and OS/2 have no select(), so they wait with napms() */
+#if !defined( _WIN32) && !defined( DOS) && !defined( macintosh) \
+     && !defined( __OS2__) \
+     && !(defined( __MWERKS__) && (defined( __MC68K__) || defined( __POWERPC__)))
+# define PDC_WAIT_WITH_SELECT
+# include <sys/select.h>
+# include <unistd.h>
+#endif
 #include <assert.h>
 
 /*man-start**************************************************************
@@ -508,6 +517,70 @@ long PDC_millisecs( void)
 #endif
 #endif      /* #ifndef _WIN32 */
 
+/* For the timeout of wgetch(), which changes of the system time must not
+move. It is in microseconds, as a timeout of a millisecond would be over when
+a clock in milliseconds steps, and clock_step gets the longest step of the
+clock. Apple's SDKs define CLOCK_MONOTONIC also for earlier systems than those
+with clock_gettime(), macOS 10.12 and iOS 10. */
+#ifdef __APPLE__
+# include <AvailabilityMacros.h>
+# if (defined( MAC_OS_X_VERSION_MIN_REQUIRED) \
+         && MAC_OS_X_VERSION_MIN_REQUIRED < 101200) \
+     || (defined( __IPHONE_OS_VERSION_MIN_REQUIRED) \
+         && __IPHONE_OS_VERSION_MIN_REQUIRED < 100000)
+#  define PDC_NO_CLOCK_GETTIME
+# endif
+#endif
+
+#if (defined( _WIN32) && !defined( DOS)) \
+     || (defined( CLOCK_MONOTONIC) && !defined( HAVE_TICKCOUNT) \
+         && !defined( PDC_NO_CLOCK_GETTIME))
+#define HAVE_MONOTONIC_MICROSECS
+
+static uint64_t _monotonic_microsecs( uint64_t *clock_step)
+{
+#if defined( _WIN32) && !defined( DOS)
+   static LARGE_INTEGER frequency;
+   LARGE_INTEGER counter;
+
+   if( frequency.QuadPart <= 0)
+       QueryPerformanceFrequency( &frequency);
+   if( frequency.QuadPart > 0 && QueryPerformanceCounter( &counter))
+   {
+       const uint64_t count = (uint64_t)counter.QuadPart;
+       const uint64_t per_second = (uint64_t)frequency.QuadPart;
+
+       if( clock_step)
+           *clock_step = 1000000 / per_second + 1;
+       /* In two parts, as the count times a million overflows */
+       return( count / per_second * 1000000
+                + count % per_second * 1000000 / per_second);
+   }
+   else
+   {
+       /* Windows before XP can lack the counter. The tick count wraps after
+          49.7 days, so its steps are added up, and it steps by up to 16 ms. */
+       static DWORD prev_tick;
+       static uint64_t millisecs;
+       const DWORD tick = GetTickCount( );
+
+       millisecs += (DWORD)( tick - prev_tick);
+       prev_tick = tick;
+       if( clock_step)
+           *clock_step = 16000;
+       return( millisecs * 1000);
+   }
+#else
+   struct timespec t;
+
+   clock_gettime( CLOCK_MONOTONIC, &t);
+   if( clock_step)
+       *clock_step = 1;
+   return( (uint64_t)t.tv_sec * 1000000 + (uint64_t)( t.tv_nsec / 1000));
+#endif
+}
+#endif
+
 /* On many systems,  checking for a key hit is quite slow.  If
 PDC_check_key( ) returns FALSE,  we can safely stop checking for
 a key hit for a millisecond.  This ensures we won't call it more
@@ -534,6 +607,42 @@ static bool _fast_check_key( void)
 #endif
 }
 
+static void _wait_for_key_or_timeout( const int ms)
+{
+    /* What napms() does before it sleeps, as redraw the colors that the
+       palette changed */
+    napms( 0);
+#if defined( _WIN32) && !defined( DOS)
+    if( PDC_wait_for_key_or_timeout( ms))
+        return;
+#elif defined( PDC_WAIT_WITH_SELECT)
+    extern enum PDC_port PDC_port_val;
+
+    if( ms > 0 && ( PDC_port_val == PDC_PORT_VT || PDC_port_val == PDC_PORT_LINUX_FB)
+            && SP && SP->input_fd)
+    {
+        const int fd = fileno( SP->input_fd);
+        if( fd >= 0)
+        {
+            fd_set rdset;
+            struct timeval timeout;
+
+            /* What PDC_napms() does while it sleeps, as play queued beeps.
+               The waits are short, as are those of PDC_napms(). */
+            PDC_napms( 0);
+            FD_ZERO( &rdset);
+            FD_SET( fd, &rdset);
+            timeout.tv_sec = ms / 1000;
+            timeout.tv_usec = ( ms % 1000) * 1000;
+            select( fd + 1, &rdset, NULL, NULL, &timeout);
+            return;
+        }
+    }
+#endif
+
+    napms( ms);
+}
+
 
 bool PDC_is_function_key( const int key)
 {
@@ -543,6 +652,9 @@ bool PDC_is_function_key( const int key)
 static int _raw_wgetch_no_surrogate_pairs( WINDOW *win)
 {
     int key = ERR, remaining_millisecs;
+#ifdef HAVE_MONOTONIC_MICROSECS
+    uint64_t deadline = 0, clock_step = 0;
+#endif
 
     PDC_LOG(("_raw_wgetch_no_surrogate_pairs() - called\n"));
 
@@ -587,6 +699,14 @@ static int _raw_wgetch_no_surrogate_pairs( WINDOW *win)
 
     /* to get here, no keys are buffered. go and get one. */
 
+    /* Count the timeout against the clock, as the waits end early when
+       input arrives */
+#ifdef HAVE_MONOTONIC_MICROSECS
+    if( remaining_millisecs > 0)
+        deadline = _monotonic_microsecs( &clock_step)
+                    + (uint64_t)remaining_millisecs * 1000;
+#endif
+
     for (;;)            /* loop for any buffering */
     {
         /* is there a keystroke ready? */
@@ -595,16 +715,60 @@ static int _raw_wgetch_no_surrogate_pairs( WINDOW *win)
         {
             /* if not, handle timeout() and halfdelay() */
             int nap_time = 50;
+#if !defined( HAVE_MONOTONIC_MICROSECS) && defined( PDC_WAIT_WITH_SELECT)
+            long wait_start;
+#endif
 
             if (remaining_millisecs != BLOCKING_INPUT)
             {
+#ifdef HAVE_MONOTONIC_MICROSECS
+                uint64_t now;
+
+                if (!remaining_millisecs)
+                    return ERR;
+                /* The clock can have stepped right after it gave the time
+                   that the deadline counts from, so the timeout is over a
+                   step after the deadline. A wait is rounded up, so that
+                   it reaches the deadline. */
+                now = _monotonic_microsecs( NULL);
+                if( now >= deadline + clock_step)
+                    return ERR;
+                if( now >= deadline)
+                    nap_time = 1;
+                else if( deadline - now < (uint64_t)nap_time * 1000)
+                    nap_time = (int)( ( deadline - now + 999) / 1000);
+#else
                 if (!remaining_millisecs)
                     return ERR;
                 if( nap_time > remaining_millisecs)
                     nap_time = remaining_millisecs;
-                remaining_millisecs -= nap_time;
+#endif
             }
-            napms( nap_time);
+#if defined( HAVE_MONOTONIC_MICROSECS)
+            _wait_for_key_or_timeout( nap_time);
+#elif defined( PDC_WAIT_WITH_SELECT)
+            wait_start = PDC_millisecs( );
+            _wait_for_key_or_timeout( nap_time);
+            if (remaining_millisecs != BLOCKING_INPUT)
+            {
+                /* The clock is the system time, which can be changed by any
+                   amount, so a wait counts no longer than it was asked to.
+                   A shorter one counts a millisecond less, as the clock can
+                   have stepped right after the wait started. */
+                long waited = PDC_millisecs( ) - wait_start;
+
+                if( waited < 0 || waited >= nap_time)
+                    waited = nap_time;
+                else if( waited > 0)
+                    waited--;
+                remaining_millisecs -= (int)waited;
+            }
+#else
+            /* The wait is napms(), which input doesn't end */
+            if (remaining_millisecs != BLOCKING_INPUT)
+                remaining_millisecs -= nap_time;
+            _wait_for_key_or_timeout( nap_time);
+#endif
         }
 
         /* if there is, fetch it */
