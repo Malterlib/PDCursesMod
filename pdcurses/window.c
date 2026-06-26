@@ -276,6 +276,21 @@ void PDC_add_window_to_list( WINDOW *win)
    SP->window_list[SP->n_windows - 1] = win;
 }
 
+static bool _remove_window_from_list( WINDOW *win)
+{
+   int i = 0;
+
+   while( i < SP->n_windows && SP->window_list[i] != win)
+      i++;
+   assert( i < SP->n_windows);
+   if( i == SP->n_windows)
+      return( FALSE);
+   SP->n_windows--;
+   SP->window_list[i] = SP->window_list[SP->n_windows];
+   _resize_window_list( SP);
+   return( TRUE);
+}
+
 WINDOW *newwin(int nlines, int ncols, int begy, int begx)
 {
     WINDOW *win;
@@ -339,15 +354,8 @@ int delwin(WINDOW *win)
 
     if( win->_firstch && win->_y && win->_y[0])
     {
-        i = 0;     /* make sure win is in the window list */
-        while( i < SP->n_windows && SP->window_list[i] != win)
-            i++;
-        assert( i < SP->n_windows);
-        if( i == SP->n_windows)
+        if( !_remove_window_from_list( win))
             return( ERR);
-        SP->n_windows--;        /* remove win from window list */
-        SP->window_list[i] = SP->window_list[SP->n_windows];
-        _resize_window_list( SP);
     }
 
     /* subwindows use parents' lines */
@@ -626,6 +634,8 @@ WINDOW *resize_window(WINDOW *win, int nlines, int ncols)
     free(win->_y);
 
     *win = *new_win;
+    if( win->_flags & (_SUBPAD|_SUBWIN))
+        _remove_window_from_list( new_win);
     free(new_win);
 
     return win;
