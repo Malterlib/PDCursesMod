@@ -66,6 +66,9 @@ void    PDC_beep(void);
 bool    PDC_can_change_color(void);
 int     PDC_color_content(int, int *, int *, int *);
 bool    PDC_check_key(void);
+#if defined( _WIN32) && !defined( DOS)
+bool    PDC_wait_for_key_or_timeout(int);
+#endif
 int     PDC_curs_set(int);
 void    PDC_doupdate(void);
 void    PDC_flushinp(void);
