@@ -32,6 +32,13 @@ int PDC_is_ansi = FALSE;
 int PDC_rows = -1, PDC_cols = -1;
 bool PDC_resize_occurred = FALSE;
 
+#ifdef USE_TERMIOS
+static struct sigaction saved_sigint_action;
+static struct sigaction saved_sigwinch_action;
+static bool saved_sigint_action_valid = FALSE;
+static bool saved_sigwinch_action_valid = FALSE;
+#endif
+
 #ifdef _WIN32
 
 #ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
@@ -302,6 +309,18 @@ void PDC_scr_close( void)
 
 void PDC_scr_free( void)
 {
+#ifdef USE_TERMIOS
+    if( saved_sigint_action_valid)
+    {
+        sigaction( SIGINT, &saved_sigint_action, NULL);
+        saved_sigint_action_valid = FALSE;
+    }
+    if( saved_sigwinch_action_valid)
+    {
+        sigaction( SIGWINCH, &saved_sigwinch_action, NULL);
+        saved_sigwinch_action_valid = FALSE;
+    }
+#endif
     PDC_free_palette( );
 #ifdef USING_COMBINING_CHARACTER_SCHEME
     PDC_expand_combined_characters( 0, NULL);
@@ -330,17 +349,40 @@ static void sigwinchHandler( int sig)
 
 int PDC_n_ctrl_c = 0;
 
+static bool _saved_sigint_action_is_ignored( void)
+{
+    return( saved_sigint_action_valid
+            && !( saved_sigint_action.sa_flags & SA_SIGINFO)
+            && saved_sigint_action.sa_handler == SIG_IGN);
+}
+
+static bool _saved_sigint_action_is_custom( void)
+{
+    if( !saved_sigint_action_valid)
+        return( FALSE);
+    if( saved_sigint_action.sa_flags & SA_SIGINFO)
+        return( saved_sigint_action.sa_sigaction != NULL);
+
+    return( saved_sigint_action.sa_handler != SIG_DFL
+            && saved_sigint_action.sa_handler != SIG_IGN);
+}
+
 static void sigintHandler( int sig)
 {
     INTENTIONALLY_UNUSED_PARAMETER( sig);
-    if( !SP->raw_inp)
+
+    if( _saved_sigint_action_is_ignored( ))
+        return;
+
+    if( SP && ( SP->raw_inp || _saved_sigint_action_is_custom( )))
     {
-        PDC_scr_close( );
-        PDC_scr_free( );
-        exit( 0);
-    }
-    else
         PDC_n_ctrl_c++;
+        return;
+    }
+
+    PDC_scr_close( );
+    PDC_scr_free( );
+    exit( 0);
 }
 #endif
 
@@ -394,19 +436,21 @@ int PDC_scr_open(void)
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
     sa.sa_handler = sigwinchHandler;
-    if (sigaction(SIGWINCH, &sa, NULL) == -1)
+    if (sigaction(SIGWINCH, &sa, &saved_sigwinch_action) == -1)
     {
         fprintf( stderr, "Sigaction failed\n");
         return( -1);
     }
+    saved_sigwinch_action_valid = TRUE;
     sigwinchHandler( 0);
 
     sa.sa_handler = sigintHandler;
-    if (sigaction(SIGINT, &sa, NULL) == -1)
+    if (sigaction(SIGINT, &sa, &saved_sigint_action) == -1)
     {
         fprintf( stderr, "Sigaction (INT) failed\n");
         return( -1);
     }
+    saved_sigint_action_valid = TRUE;
 #else
     {
         const char *env = getenv("PDC_LINES");
