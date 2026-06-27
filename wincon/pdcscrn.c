@@ -539,6 +539,52 @@ static BOOL _fit_console_window(HANDLE con_out, CONST SMALL_RECT *rect)
     return FALSE;
 }
 
+static void _resize_console_to_window_size(HANDLE con_out, SHORT nlines, SHORT ncols)
+{
+    COORD size, grow_size;
+    SMALL_RECT rect;
+    CONSOLE_SCREEN_BUFFER_INFO scr;
+
+    if (nlines < 2 || ncols < 2)
+        return;
+
+    if (!GetConsoleScreenBufferInfo(con_out, &scr))
+        return;
+
+    rect.Left = rect.Top = 0;
+    rect.Right = ncols - 1;
+    rect.Bottom = nlines - 1;
+
+    grow_size.X = scr.dwSize.X > ncols ? scr.dwSize.X : ncols;
+    grow_size.Y = scr.dwSize.Y > nlines ? scr.dwSize.Y : nlines;
+    if (grow_size.X != scr.dwSize.X || grow_size.Y != scr.dwSize.Y)
+        SetConsoleScreenBufferSize(con_out, grow_size);
+
+    _fit_console_window(con_out, &rect);
+
+    size.X = ncols;
+    size.Y = nlines;
+    SetConsoleScreenBufferSize(con_out, size);
+    _fit_console_window(con_out, &rect);
+}
+
+static void _resize_shell_screen_buffer_to_current_size(void)
+{
+    CONSOLE_SCREEN_BUFFER_INFO scr;
+    SHORT nlines, ncols;
+
+    if (pdc_con_out == std_con_out)
+        return;
+
+    if (!GetConsoleScreenBufferInfo(pdc_con_out, &scr))
+        return;
+
+    nlines = scr.srWindow.Bottom - scr.srWindow.Top + 1;
+    ncols = scr.srWindow.Right - scr.srWindow.Left + 1;
+
+    _resize_console_to_window_size(std_con_out, nlines, ncols);
+}
+
 /* the core of resize_term() */
 
 int PDC_resize_screen(int nlines, int ncols)
@@ -624,7 +670,10 @@ void PDC_reset_shell_mode(void)
     PDC_LOG(("PDC_reset_shell_mode() - called.\n"));
 
     if (pdc_con_out != std_con_out)
+    {
+        _resize_shell_screen_buffer_to_current_size();
         SetConsoleActiveScreenBuffer(std_con_out);
+    }
     else if (is_nt)
     {
         SetConsoleScreenBufferSize(pdc_con_out, orig_scr.dwSize);

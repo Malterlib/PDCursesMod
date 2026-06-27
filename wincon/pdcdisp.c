@@ -18,6 +18,40 @@ DWORD pdc_last_blink;
 static bool blinked_off = FALSE;
 static bool in_italic = FALSE;
 
+static bool _get_console_size(int *rows, int *cols)
+{
+    CONSOLE_SCREEN_BUFFER_INFO scr;
+
+    assert(rows);
+    assert(cols);
+
+    if (!GetConsoleScreenBufferInfo(pdc_con_out, &scr))
+        return FALSE;
+
+    *rows = scr.srWindow.Bottom - scr.srWindow.Top + 1;
+    *cols = scr.srWindow.Right - scr.srWindow.Left + 1;
+    return TRUE;
+}
+
+static int _clip_run_to_console(int lineno, int x, int len, bool avoid_bottom_right)
+{
+    int rows, cols;
+
+    if (len <= 0 || !_get_console_size(&rows, &cols))
+        return 0;
+
+    if (lineno < 0 || lineno >= rows || x < 0 || x >= cols)
+        return 0;
+
+    if (x + len > cols)
+        len = cols - x;
+
+    if (avoid_bottom_right && lineno == rows - 1 && x + len == cols)
+        len--;
+
+    return len;
+}
+
 /* position hardware cursor at (y, x) */
 
 void PDC_gotoyx(int row, int col)
@@ -168,8 +202,12 @@ static void _show_run_of_ansi_characters( const attr_t attr,
     char buffer[MAX_PACKET_LEN];
 #endif
     int j, n_out;
+    const int clipped_len = _clip_run_to_console(lineno, x, len, TRUE);
 
-    for (j = n_out = 0; j < len; j++)
+    if (!clipped_len)
+        return;
+
+    for (j = n_out = 0; j < clipped_len; j++)
     {
         chtype ch = srcp[j];
 
@@ -214,6 +252,10 @@ static void _show_run_of_nonansi_characters( attr_t attr,
     SMALL_RECT sr;
     WORD mapped_attr;
     int j, n_out;;
+    const int clipped_len = _clip_run_to_console(lineno, x, len, FALSE);
+
+    if (!clipped_len)
+        return;
 
     fore = pdc_curstoreal[fore];
     back = pdc_curstoreal[back];
@@ -230,7 +272,7 @@ static void _show_run_of_nonansi_characters( attr_t attr,
     if (attr & A_RIGHT)
         mapped_attr |= 0x1000; /* COMMON_LVB_GRID_RVERTICAL */
 
-    for (j = n_out = 0; j < len; j++)
+    for (j = n_out = 0; j < clipped_len; j++)
     {
         chtype ch = srcp[j];
 
@@ -284,7 +326,7 @@ static void _show_run_of_nonansi_characters( attr_t attr,
 
     sr.Top = sr.Bottom = (SHORT)lineno;
     sr.Left = (SHORT)x;
-    sr.Right = (SHORT)( x + len - 1);
+    sr.Right = (SHORT)( x + clipped_len - 1);
 
     WriteConsoleOutput(pdc_con_out, buffer, bufSize, bufPos, &sr);
 }
