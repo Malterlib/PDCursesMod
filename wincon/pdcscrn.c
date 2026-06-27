@@ -104,6 +104,7 @@ static CONSOLE_SCREEN_BUFFER_INFOEX console_infoex;
 static LPTOP_LEVEL_EXCEPTION_FILTER xcpt_filter;
 
 static DWORD old_console_mode = 0;
+static bool pdc_terminal_alternate_screen_active = FALSE;
 
 /* MSVC++ 7.1 was the last version to support Win95/98/ME.  If we're
 on any MSVC after that (_MSC_VER > 1310),  is_nt is going to be true
@@ -120,6 +121,44 @@ static void _reset_old_colors(void)
     pdc_oldf = -1;
     pdc_oldb = -1;
     pdc_oldu = 0;
+}
+
+static bool _write_terminal_vt_sequence(HANDLE con_out, const char *sequence)
+{
+    DWORD mode, written;
+    bool result;
+
+    if (con_out == INVALID_HANDLE_VALUE || !sequence)
+        return FALSE;
+
+    if (!GetConsoleMode(con_out, &mode))
+        return FALSE;
+
+    /* ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING */
+    if (!SetConsoleMode(con_out, mode | 0x0001 | 0x0004))
+        return FALSE;
+
+    result = !!WriteConsoleA(con_out, sequence, (DWORD)strlen(sequence), &written, NULL);
+    SetConsoleMode(con_out, mode);
+    return result;
+}
+
+static void _enter_terminal_alternate_screen(void)
+{
+    if (pdc_terminal_alternate_screen_active || SP->_preserve)
+        return;
+
+    if (_write_terminal_vt_sequence(std_con_out, "\x1b[?1049h"))
+        pdc_terminal_alternate_screen_active = TRUE;
+}
+
+static void _leave_terminal_alternate_screen(void)
+{
+    if (!pdc_terminal_alternate_screen_active)
+        return;
+
+    _write_terminal_vt_sequence(std_con_out, "\x1b[?1049l");
+    pdc_terminal_alternate_screen_active = FALSE;
 }
 
 static HWND _find_console_handle(void)
@@ -642,6 +681,8 @@ void PDC_reset_prog_mode(void)
 {
     PDC_LOG(("PDC_reset_prog_mode() - called.\n"));
 
+    _enter_terminal_alternate_screen();
+
     if (pdc_con_out != std_con_out)
         SetConsoleActiveScreenBuffer(pdc_con_out);
     else if (is_nt)
@@ -682,6 +723,8 @@ void PDC_reset_shell_mode(void)
         SetConsoleWindowInfo(pdc_con_out, TRUE, &orig_scr.srWindow);
         SetConsoleActiveScreenBuffer(pdc_con_out);
     }
+
+    _leave_terminal_alternate_screen();
 
     SetConsoleMode(pdc_con_in, old_console_mode | 0x0080);
 }
